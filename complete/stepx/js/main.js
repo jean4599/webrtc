@@ -4,12 +4,16 @@
 
 var configuration = {'iceServers': [{'url': 'stun:stun.l.google.com:19302'}]};
 // {"url":"stun:stun.services.mozilla.com"}
-//var server = 'https://127.0.0.1:8080/';
-var server = 'https://140.114.77.126:8080/';
-var serverIP = '140.114.77.126';
+
+//var serverIP = '140.114.77.126';
+//var server = 'https://140.114.77.126:8080/';
+
+var server = 'https://127.0.0.1:8080/';
+var serverIP = '127.0.0.1';
 
     roomURL = document.getElementById('url'),
-    video = document.getElementsByTagName('video')[0],
+    video = document.getElementById('video'),
+    cameraVideo = document.getElementById('camera'),
     remoteVideo = document.getElementById("remoteVideo"),
     photo = document.getElementById('photo'),
     photoContext = photo.getContext('2d'),
@@ -21,20 +25,25 @@ var serverIP = '140.114.77.126';
     startButton = document.getElementById("startButton"),
     callButton = document.getElementById("callButton"),
     hangupButton = document.getElementById("hangupButton"),
- 
-    localStream = null;
+    playBtn = document.getElementById('play'),
+    pauseBtn = document.getElementById('pause'),
+
+    localStream = null,
     // Default values for width and height of the photoContext.
-    // Maybe redefined later based on user's webcam video stream.
+    // Maybe redefined later based on user's webcam cameraVideo stream.
     photoContextW = 300, photoContextH = 150;
+    video.controls = true;
 
 // Attach even handlers
-video.addEventListener('play', setCanvasDimensions);
+cameraVideo.addEventListener('play', setCanvasDimensions);
 snapBtn.addEventListener('click', snapPhoto);
 sendBtn.addEventListener('click', sendPhoto);
 snapAndSendBtn.addEventListener('click', snapAndSend);
 startButton.onclick = start;
 callButton.onclick = call;
 hangupButton.onclick = hangup;
+playBtn.onclick = videoPlay;
+pauseBtn.onclick = videoPause;
 
 startButton.disabled = false;
 callButton.disabled = true;
@@ -93,7 +102,10 @@ socket.on('message', function (message){
     console.log('Client received message:', message);
     signalingMessageCallback(message);
 });
-
+socket.on('set initiator',function(){
+    console.log('Client set initiator');
+    isInitiator = true;
+});
 if (location.hostname == serverIP) {
     socket.emit('ipaddr');
 }
@@ -128,21 +140,35 @@ function start() {
   startButton.disabled = true;
   snapBtn.disabled = false;
 
-  getUserMedia({audio:true, video:true}, getMediaSuccessCallback, getMediaErrorCallback);
+  constraints = {
+    "audio": true,
+    "video": {
+        "width": {
+            "min": "300",
+            "max": "640"
+        },
+        "height": {
+            "min": "200",
+            "max": "480"
+        }
+    }
+}
+  getUserMedia(constraints, getMediaSuccessCallback, getMediaErrorCallback);
 }
 
 // function grabWebCamVideo() {
-//     console.log('Getting user media (video) ...');
-//     getUserMedia({video: true}, getMediaSuccessCallback, getMediaErrorCallback);
+//     console.log('Getting user media (cameraVideo) ...');
+//     getUserMedia({cameraVideo: true}, getMediaSuccessCallback, getMediaErrorCallback);
 // }
 
 function getMediaSuccessCallback(stream) {
     callButton.disabled = false;
     var streamURL = window.URL.createObjectURL(stream);
-    console.log('getUserMedia video stream URL:', streamURL);
+    console.log('getUserMedia cameraVideo stream URL:', streamURL);
     localStream = stream; // stream available to console
 
-    video.src = streamURL;
+    cameraVideo.src = streamURL;
+    //video.src = '../video/src1.mp4';
     show(snapBtn);
 }
 
@@ -150,25 +176,39 @@ function getMediaErrorCallback(error){
     console.log("getUserMedia error:", error);
 }
 
+/**************************************************************************** 
+ * Setup Video
+ ****************************************************************************/
+ video.src = '../video/src1.mp4';
+// var src = "https://www.youtube.com/watch?v=vlR84-WZhl4";
+// getVideoSource(src);
+// function getVideoSource(src){
+//     var isYoutube = src && src.match(/(?:youtu|youtube)(?:\.com|\.be)\/([\w\W]+)/i);
+//     var id = isYoutube[1].match(/watch\?v=|[\w\W]+/gi);
+//     id = (id.length > 1) ? id.splice(1) : id;
+//     id = id.toString();
+//     var mp4url = "https://youtubeinmp4.com/redirect.php?video=";
+//     video.src = mp4url + id;
+// }
 
 /**************************************************************************** 
  * WebRTC peer connection and data channel
  ****************************************************************************/
 
 var peerConn;
-var dataChannel;
+var photoChannel;
+var videoSyncChannel;
 
 function call() {
   callButton.disabled = true;
   hangupButton.disabled = false;
   snapAndSendBtn.disabled = false;
   trace("Starting call");
-
-    // Join a room
+     // Join a room
     socket.emit('create or join', room);
 
   if (localStream.getVideoTracks().length > 0) {
-    trace('Using video device: ' + localStream.getVideoTracks()[0].label);
+    trace('Using cameraVideo device: ' + localStream.getVideoTracks()[0].label);
   }
   if (localStream.getAudioTracks().length > 0) {
     trace('Using audio device: ' + localStream.getAudioTracks()[0].label);
@@ -190,6 +230,12 @@ function signalingMessageCallback(message) {
 
     } else if (message === 'bye') {
         // TODO: cleanup RTC connection?
+        console.log('Got bye.');
+        peerConn.close();
+        peerConn = null;
+    }else if (message === 'recall'){
+        console.log('Got recall.');
+        createPeerConnection(isInitiator, configuration, photo);
     }
 }
 
@@ -221,17 +267,28 @@ function createPeerConnection(isInitiator, config, channel) {
     }
 
     if (isInitiator) {
+        /**************************************
+        Create Data Channel
+        ***************************************/
         console.log('Creating Data Channel');
-        dataChannel = peerConn.createDataChannel("photos");
-        onDataChannelCreated(dataChannel);
+        photoChannel = peerConn.createDataChannel("photos");
+        onPhotoChannelCreated(photoChannel);
+        videoSyncChannel = peerConn.createDataChannel("videoSync");
+        onVideoSyncChannelCreated(videoSyncChannel);
 
         console.log('Creating an offer');
         peerConn.createOffer(onLocalSessionCreated, logError);
     } else {
         peerConn.ondatachannel = function (event) {
-            console.log('ondatachannel:', event.channel);
-            dataChannel = event.channel;
-            onDataChannelCreated(dataChannel);
+            console.log('ondatachannel:', event);
+            if(event.channel.label === 'photos'){ 
+                photoChannel = event.channel;
+                onPhotoChannelCreated(photoChannel);
+            }else if(event.channel.label === 'videoSync'){ 
+                videoSyncChannel = event.channel;
+                onVideoSyncChannelCreated(videoSyncChannel);
+            }
+           
         };
     }
 }
@@ -244,11 +301,46 @@ function onLocalSessionCreated(desc) {
     }, logError);
 }
 
-function onDataChannelCreated(channel) {
-    console.log('onDataChannelCreated:', channel);
+function onVideoSyncChannelCreated(channel){
+    console.log('onVideoSyncChannelCreated:', channel);
 
     channel.onopen = function () {
-        console.log('CHANNEL opened!!!');
+        console.log('videoSync channel opened!!!');
+
+        video.addEventListener('play',function(){
+            channel.send('play');
+        });
+        video.addEventListener('pause',function(){
+            channel.send('pause');
+        });
+        video.addEventListener('seeked',function(){
+            channel.send('time:'+video.currentTime);
+        });
+    }
+
+    channel.onmessage = function (event){
+        console.log('Got message from videoSyncChannel '+event);
+        syncVideo(event.data);
+    }
+}
+/********************************************
+Debug message
+********************************************/
+        video.addEventListener('play',function(){
+            console.log('play');
+        });
+        video.addEventListener('pause',function(){
+            console.log('pause');
+        });
+        video.addEventListener('seeked',function(){
+            console.log('time:'+video.currentTime);
+        });
+
+function onPhotoChannelCreated(channel) {
+    console.log('onPhotoChannelCreated:', channel);
+
+    channel.onopen = function () {
+        console.log('Photo channel opened!!!');
     };
 
     channel.onmessage = (webrtcDetectedBrowser == 'firefox') ? 
@@ -257,10 +349,12 @@ function onDataChannelCreated(channel) {
 }
 
 function hangup() {
-  trace("Ending call");
-  peerConn.close();
-  hangupButton.disabled = true;
-  callButton.disabled = false;
+      hangupButton.disabled = true;
+      callButton.disabled = false;
+      trace("Ending call");
+      socket.emit('leave',room);
+      peerConn.close();
+      peerConn = null;
 }
 
 function receiveDataChromeFactory() {
@@ -324,14 +418,40 @@ function receiveDataFirefoxFactory() {
         }
     }
 }
+/**************************************************************************** 
+ * Video Sync functions, mostly UI-related
+ ****************************************************************************/
 
-
+function syncVideo(message){
+    console.log("receive message "+message);
+    if(message === 'play'){
+        video.play();
+    }else if(message === 'pause'){
+        video.pause();
+    }else{
+        time = parseFloat(message.split(':')[1]);
+        console.log('set video to time '+time);
+        if(Math.abs(video.currentTime - time)>0.5){    
+            video.currentTime = time;
+        }
+        
+    }
+    
+}
+function videoPlay(){
+    video.play();
+    videoSyncChannel.send('play');
+}
+function videoPause(){
+    video.pause();
+    videoSyncChannel.send('pause');
+}
 /**************************************************************************** 
  * Aux functions, mostly UI-related
  ****************************************************************************/
 
 function snapPhoto() {
-    photoContext.drawImage(video, 0, 0, photoContextW, photoContextH);
+    photoContext.drawImage(cameraVideo, 0, 0, photoContextW, photoContextH);
     show(photo, sendBtn);
 }
 
@@ -344,20 +464,20 @@ function sendPhoto() {
         n = len / CHUNK_LEN | 0;
 
     console.log('Sending a total of ' + len + ' byte(s)');
-    dataChannel.send(len);
+    photoChannel.send(len);
 
     // split the photo and send in chunks of about 64KB
     for (var i = 0; i < n; i++) {
         var start = i * CHUNK_LEN,
             end = (i+1) * CHUNK_LEN;
         console.log(start + ' - ' + (end-1));
-        dataChannel.send(img.data.subarray(start, end));
+        photoChannel.send(img.data.subarray(start, end));
     }
 
     // send the reminder, if any
     if (len % CHUNK_LEN) {
         console.log('last ' + len % CHUNK_LEN + ' byte(s)');
-        dataChannel.send(img.data.subarray(n * CHUNK_LEN));
+        photoChannel.send(img.data.subarray(n * CHUNK_LEN));
     }
 }
 
@@ -378,15 +498,15 @@ function renderPhoto(data) {
 }
 
 function setCanvasDimensions() {
-    if (video.videoWidth == 0) {
+    if (cameraVideo.cameraVideoWidth == 0) {
         setTimeout(setCanvasDimensions, 200);
         return;
     }
     
-    console.log('video width:', video.videoWidth, 'height:', video.videoHeight)
+    console.log('cameraVideo width:', cameraVideo.videoWidth, 'height:', cameraVideo.videoHeight)
 
-    photoContextW = video.videoWidth / 2;
-    photoContextH = video.videoHeight / 2;
+    photoContextW = cameraVideo.cameraVideoWidth / 2;
+    photoContextH = cameraVideo.cameraVideoHeight / 2;
     //photo.style.width = photoContextW + 'px';
     //photo.style.height = photoContextH + 'px';
     // TODO: figure out right dimensions

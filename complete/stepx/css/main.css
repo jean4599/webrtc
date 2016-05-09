@@ -1,11 +1,15 @@
-.camera {
+#camera, #remoteVideo,#video {
     width: 320px;
     min-height: 240px;
     float: left;
     margin: 0 20px 25px 0;
     border: 1px solid #aaa;
 }
-
+#camera{
+     transform: rotateY(180deg);
+    -webkit-transform:rotateY(180deg); /* Safari and Chrome */
+    -moz-transform:rotateY(180deg); /* Firefox */
+}
 .incoming {
     clear: both;
     padding-top: 0.7em;

@@ -15,8 +15,13 @@
             Room URL: <br>
             <code id="url">...</code>
         </p>
-
-        <video class="camera" autoplay></video>
+        <video id="video" ></video>
+        <p>
+                    <button class="video" id="play">play</button>
+                    <button class="video" id="pause">pause</button>
+        </p>
+        <video id="camera" autoplay></video>
+        <video id="remoteVideo" autoplay></video>
 		
         <div class="controls">
             <canvas id="photo" style="width: 200px; height: 150px; border: 1px solid #ccc;"></canvas>
@@ -25,8 +30,7 @@
                 <br> - or - <br>
                 <button id="snapAndSend">snap & send</button>
             </p>
-        </div>
-		<video id="remoteVideo" autoplay></video>
+        </div>	
 		<div>
 		  <button id="startButton">Start</button>
 		  <button id="callButton">Call</button>

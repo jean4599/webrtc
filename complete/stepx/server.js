@@ -2,8 +2,9 @@
  var static = require('node-static');
 // var http = require('http');
 var socketIO = require('socket.io');
-var ip = '140.114.77.126';
-//var ip = '127.0.0.1';
+
+//var ip = '140.114.77.126';
+var ip = '127.0.0.1';
 
  var fileServer = new(static.Server)();
 // var app = http.createServer(function (req, res) {
@@ -55,7 +56,10 @@ io.sockets.on('connection', function (socket){
 			socket.emit('full', room);
 		}
 	});
-
+	socket.on('leave',function(room){
+		socket.leave(room);
+		socket.broadcast.emit('set initiator');
+	});
     socket.on('ipaddr', function () {
         var ifaces = os.networkInterfaces();
         for (var dev in ifaces) {
